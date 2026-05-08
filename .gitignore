@@ -1,0 +1,9 @@
+s2tenv/
+models/
+data/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.sph2txt.lock

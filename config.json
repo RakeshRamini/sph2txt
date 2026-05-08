@@ -1,0 +1,34 @@
+{
+  "model": "large-v3-turbo",
+  "device": "cuda",
+  "compute_type": "float16",
+  "language": "en",
+  "hotkey": ["alt", "x"],
+  "mode": "push_to_talk",
+  "beam_size": 5,
+  "vad_filter": true,
+  "injection_mode": "clipboard",
+  "typing_speed": 0.01,
+  "restore_clipboard": true,
+  "voice_commands": {
+    "new line": "\n",
+    "new paragraph": "\n\n",
+    "tab": "\t"
+  },
+  "paths": {
+    "model_cache": "models/huggingface",
+    "data_root": "data",
+    "log_dir": "logs"
+  },
+  "logging": {
+    "enabled": true,
+    "log_target_app": true,
+    "log_window_title": false,
+    "retention_days": 90,
+    "max_db_size_mb": 500
+  },
+  "storage": {
+    "auto_cleanup": true,
+    "cleanup_on_startup": true
+  }
+}
