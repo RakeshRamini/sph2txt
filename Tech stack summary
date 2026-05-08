@@ -1,0 +1,46 @@
+## sph2txt — Summary
+
+**What it does:** A local, offline speech-to-text app. Place your cursor anywhere, hold **Alt+X**, speak, release — your speech is transcribed and typed at the cursor position.
+
+---
+
+### Model
+
+| | |
+|---|---|
+| **Model** | [Whisper large-v3-turbo](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) (~1.5 GB) |
+| **Runtime** | [CTranslate2](https://github.com/OpenNMT/CTranslate2) 4.7.1 — optimized C++ inference engine |
+| **Precision** | float16 on CUDA (RTX 4080, 12 GB VRAM) |
+| **Note** | This is **not an LLM** — Whisper is a speech recognition (ASR) encoder-decoder model. No text generation or chat capability. |
+
+---
+
+### Tech Stack
+
+| Component | Tool | Purpose |
+|---|---|---|
+| **Speech recognition** | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 1.2.1 | Python wrapper around CTranslate2 for Whisper inference |
+| **GPU acceleration** | CUDA + cuDNN 9.22 + cuBLAS 12.9 | NVIDIA GPU inference (~1s transcription for ~3s audio) |
+| **Audio capture** | [sounddevice](https://python-sounddevice.readthedocs.io/) 0.5.1 (PortAudio) | Microphone recording at 48kHz, resampled to 16kHz |
+| **Global hotkey** | [pynput](https://pynput.readthedocs.io/) 1.8.1 | System-wide Alt+X listener (push-to-talk) |
+| **Text injection** | [pyperclip](https://github.com/asweigart/pyperclip) + pynput | Clipboard paste (Ctrl+V) with original clipboard save/restore |
+| **System tray** | [pystray](https://github.com/moses-palmer/pystray) 0.19.5 + [Pillow](https://pillow.readthedocs.io/) | Tray icon with 3 states (idle/recording/processing) |
+| **Settings UI** | tkinter (built-in) | Hotkey config, live logs, activate/deactivate |
+| **VAD** | Silero VAD (via faster-whisper) | Filters silence before transcription |
+| **Runtime** | Python 3.13, virtual env (s2tenv) | Self-contained in project directory |
+
+---
+
+### Architecture (7 modules)
+
+1. **transcriber.py** — Loads Whisper model, runs GPU inference
+2. **audio.py** — Mic capture with auto-device detection + resampling
+3. **postprocess.py** — Voice commands ("new line" → `\n`), whitespace cleanup
+4. **injector.py** — Pastes transcribed text at cursor via clipboard
+5. **hotkey.py** — Global hotkey listener with enable/disable toggle
+6. **tray.py** — System tray icon + Settings menu
+7. **ui.py** — tkinter settings panel (hotkey editor, logs, app control)
+
+**Pipeline:** `Alt+X hold → record audio → release → transcribe (GPU) → postprocess → paste at cursor`
+
+Everything runs **locally and offline** (after initial model download). No data leaves the machine.
