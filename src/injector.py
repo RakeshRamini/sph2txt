@@ -3,9 +3,11 @@ sph2txt — Text injection at cursor position.
 
 Default mode: clipboard paste (Ctrl+V) with clipboard save/restore.
 Fallback mode: character-by-character keystroke simulation via pynput.
+Clipboard restore uses a configurable delay with cancellable timer.
 """
 
 import logging
+import threading
 import time
 
 import pyperclip
@@ -14,6 +16,8 @@ from pynput.keyboard import Controller, Key
 logger = logging.getLogger(__name__)
 
 _kb = Controller()
+_restore_timer: threading.Timer | None = None
+_restore_lock = threading.Lock()
 
 
 def inject(text: str, config: dict) -> None:
@@ -30,8 +34,16 @@ def inject(text: str, config: dict) -> None:
 
 def _inject_clipboard(text: str, config: dict) -> None:
     """Copy text to clipboard, paste with Ctrl+V, restore original clipboard."""
+    global _restore_timer
     restore = config.get("restore_clipboard", True)
+    delay_ms = config.get("clipboard_restore_delay_ms", 500)
     original = None
+
+    # Cancel any pending clipboard restore from a previous injection
+    with _restore_lock:
+        if _restore_timer is not None:
+            _restore_timer.cancel()
+            _restore_timer = None
 
     if restore:
         try:
@@ -49,10 +61,27 @@ def _inject_clipboard(text: str, config: dict) -> None:
     time.sleep(0.05)
 
     if restore and original is not None:
-        time.sleep(0.1)  # wait for paste to complete before restoring
-        pyperclip.copy(original)
+        with _restore_lock:
+            _restore_timer = threading.Timer(
+                delay_ms / 1000.0,
+                _deferred_restore,
+                args=(original,),
+            )
+            _restore_timer.daemon = True
+            _restore_timer.start()
 
     logger.info("Injected %d chars via clipboard paste.", len(text))
+
+
+def _deferred_restore(original: str) -> None:
+    """Restore the original clipboard contents after a delay."""
+    global _restore_timer
+    try:
+        pyperclip.copy(original)
+    except Exception:
+        logger.debug("Failed to restore clipboard.")
+    with _restore_lock:
+        _restore_timer = None
 
 
 def _inject_keystrokes(text: str, config: dict) -> None:

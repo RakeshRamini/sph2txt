@@ -5,11 +5,19 @@
   "language": "en",
   "hotkey": ["alt", "x"],
   "mode": "push_to_talk",
-  "beam_size": 5,
+  "beam_size": 3,
   "vad_filter": true,
   "injection_mode": "clipboard",
   "typing_speed": 0.01,
   "restore_clipboard": true,
+  "clipboard_restore_delay_ms": 500,
+  "gpu_keepalive": true,
+  "keepalive_interval_sec": 180,
+  "warmup_on_startup": true,
+  "resampler": "soxr",
+  "notification_sounds": true,
+  "silence_rejection": true,
+  "silence_threshold": 0.001,
   "voice_commands": {
     "new line": "\n",
     "new paragraph": "\n\n",
@@ -25,7 +33,9 @@
     "log_target_app": true,
     "log_window_title": false,
     "retention_days": 90,
-    "max_db_size_mb": 500
+    "max_db_size_mb": 500,
+    "max_log_files": 5,
+    "max_log_size_mb": 10
   },
   "storage": {
     "auto_cleanup": true,

@@ -8,6 +8,7 @@ Supports two modes:
 """
 
 import logging
+import time
 import threading
 from typing import Callable
 
@@ -28,6 +29,8 @@ _KEY_MAP = {
     "shift_r": keyboard.Key.shift_r,
     "cmd": keyboard.Key.cmd,
 }
+
+_STALE_KEY_TIMEOUT = 30  # seconds before a pressed key is considered stuck
 
 
 def _parse_hotkey(hotkey_list: list[str]) -> tuple:
@@ -57,6 +60,7 @@ class HotkeyListener:
         self._on_release = on_release
 
         self._pressed_keys: set = set()
+        self._key_press_times: dict = {}  # key → timestamp
         self._active = False  # for toggle mode
         self._recording = False  # guard against repeat key events
         self._enabled = True  # can be toggled from UI
@@ -110,8 +114,21 @@ class HotkeyListener:
         normalized = {self._normalize(k) for k in self._pressed_keys}
         return self._hotkey_keys.issubset(normalized)
 
+    def _evict_stale_keys(self) -> None:
+        """Remove keys that have been 'pressed' for longer than the timeout."""
+        now = time.monotonic()
+        stale = [k for k, t in self._key_press_times.items()
+                 if now - t > _STALE_KEY_TIMEOUT]
+        for k in stale:
+            self._pressed_keys.discard(k)
+            del self._key_press_times[k]
+        if stale:
+            logger.debug("Evicted %d stale keys from pressed set.", len(stale))
+
     def _on_key_press(self, key):
+        self._evict_stale_keys()
         self._pressed_keys.add(key)
+        self._key_press_times[key] = time.monotonic()
         if not self._enabled or not self._hotkey_matched():
             return
 
@@ -138,6 +155,7 @@ class HotkeyListener:
 
     def _on_key_release(self, key):
         self._pressed_keys.discard(key)
+        self._key_press_times.pop(key, None)
         if self._mode == "push_to_talk" and not self._hotkey_matched():
             with self._lock:
                 if not self._recording:

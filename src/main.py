@@ -2,14 +2,17 @@
 sph2txt — Main entry point and orchestrator.
 
 Initializes all components and runs the application loop:
-  1. Load config
-  2. Initialize Whisper model (GPU)
-  3. Start system tray
+  1. Load & validate config
+  2. Initialize Whisper model (GPU) + warmup
+  3. Start system tray (background thread)
   4. Listen for hotkey
-  5. On trigger: capture audio → transcribe → inject text
+  5. On trigger: capture audio → silence check → transcribe → inject text
+  6. Main thread handles settings UI requests and quit signal
 """
 
+import atexit
 import logging
+import logging.handlers
 import os
 import sys
 import threading
@@ -53,12 +56,18 @@ from src.postprocess import postprocess
 from src.injector import inject
 from src.hotkey import HotkeyListener
 from src.tray import TrayIcon
+from src.notifications import play_ready, play_complete
 
 logger = logging.getLogger(__name__)
+
+# Module-level lock file handle — prevents GC from releasing the lock
+_lock_fh = None
 
 
 def main():
     """Application entry point."""
+    global _lock_fh
+
     # --- Single-instance lock ---
     lock_path = os.path.join(_project_root, ".sph2txt.lock")
     try:
@@ -69,36 +78,78 @@ def main():
         print("sph2txt is already running.")
         return
 
-    # --- Logging ---
+    # Clean up lock file on exit
+    def _cleanup_lock():
+        try:
+            if _lock_fh:
+                _lock_fh.close()
+            if os.path.exists(lock_path):
+                os.remove(lock_path)
+        except OSError:
+            pass
+    atexit.register(_cleanup_lock)
+
+    # --- Config ---
     config = load_config()
+
+    # --- Logging (with rotation) ---
     log_dir = resolve_path(config, "log_dir")
     os.makedirs(log_dir, exist_ok=True)
+    log_cfg = config.get("logging", {})
+    max_bytes = log_cfg.get("max_log_size_mb", 10) * 1024 * 1024
+    max_files = log_cfg.get("max_log_files", 5)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(os.path.join(log_dir, "sph2txt.log"),
-                                encoding="utf-8"),
+            logging.handlers.RotatingFileHandler(
+                os.path.join(log_dir, "sph2txt.log"),
+                maxBytes=max_bytes,
+                backupCount=max_files,
+                encoding="utf-8",
+            ),
         ],
     )
     logger.info("sph2txt starting...")
 
     # --- Components ---
     transcriber = Transcriber(config)
-    recorder = AudioRecorder()
+
+    # Warmup
+    if config.get("warmup_on_startup", True):
+        transcriber.warmup()
+
+    # GPU keepalive
+    transcriber.start_keepalive()
+
+    recorder = AudioRecorder(resampler=config.get("resampler", "soxr"))
     quit_event = threading.Event()
     tray = TrayIcon(on_quit=quit_event)
 
+    sounds_enabled = config.get("notification_sounds", True)
+    silence_rejection = config.get("silence_rejection", True)
+    silence_threshold = config.get("silence_threshold", 0.001)
+
     # --- Pipeline callbacks ---
     def on_hotkey_press():
+        if tray.app_mode != "active":
+            return
         tray.set_state("recording")
         recorder.start()
 
     def on_hotkey_release():
+        if tray.app_mode != "active":
+            return
         audio = recorder.stop()
         if len(audio) == 0:
             logger.warning("No audio captured, skipping.")
+            tray.set_state("idle")
+            return
+
+        # Silence rejection — skip inference on accidental hotkey presses
+        if silence_rejection and AudioRecorder.is_silent(audio, silence_threshold):
+            logger.info("Audio below silence threshold (RMS < %.4f), skipping.", silence_threshold)
             tray.set_state("idle")
             return
 
@@ -110,6 +161,7 @@ def main():
             if text:
                 inject(text, config)
                 logger.info("Injected: %s", text)
+                play_complete(sounds_enabled)
             else:
                 logger.info("Transcription was empty after post-processing.")
         except Exception:
@@ -122,21 +174,61 @@ def main():
                             on_release=on_hotkey_release)
     hotkey.start()
     tray._hotkey_listener = hotkey
+    tray._transcriber = transcriber
 
-    # --- System tray (blocks until quit) ---
+    # --- System tray (background thread) ---
+    def _run_tray():
+        try:
+            tray.start()
+        except Exception:
+            logger.exception("Tray icon crashed")
+
+    tray_thread = threading.Thread(target=_run_tray, daemon=True)
+    tray_thread.start()
+    # Give the tray a moment to initialize before proceeding
+    import time
+    time.sleep(0.5)
+
+    # --- Startup complete ---
     logger.info("Ready. Press Alt+X to speak.")
+    play_ready(sounds_enabled)
+
+    # --- Main thread event loop ---
+    # Handles settings UI requests (tkinter must run on main thread)
+    # and waits for quit signal.
     try:
-        tray.start()  # blocks here
+        while not quit_event.is_set():
+            # Check if settings were requested
+            if tray.settings_event.wait(timeout=0.5):
+                tray.settings_event.clear()
+                _open_settings(hotkey)
     except KeyboardInterrupt:
         pass
     finally:
+        transcriber.stop_keepalive()
         hotkey.stop()
         quit_event.set()
         logger.info("sph2txt stopped.")
 
 
-if __name__ == "__main__":
-    main()
+def _open_settings(hotkey_listener):
+    """Open settings UI on the main thread (tkinter-safe)."""
+    from src.ui import SettingsUI
+    logger.info("Opening settings window.")
+
+    def _activate():
+        hotkey_listener.enabled = True
+
+    def _deactivate():
+        hotkey_listener.enabled = False
+
+    ui = SettingsUI(
+        on_activate=_activate,
+        on_deactivate=_deactivate,
+        initially_active=hotkey_listener.enabled,
+    )
+    ui.show()  # blocks until window is closed
+
 
 if __name__ == "__main__":
     main()

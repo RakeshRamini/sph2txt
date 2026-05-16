@@ -47,7 +47,7 @@ class SettingsUI:
         """Create and show the settings window (blocks on mainloop)."""
         self._root = tk.Tk()
         self._root.title("sph2txt — Settings")
-        self._root.geometry("620x520")
+        self._root.geometry("640x680")
         self._root.resizable(True, True)
         self._root.configure(bg="#1e1e1e")
 
@@ -68,10 +68,36 @@ class SettingsUI:
                         foreground="#ffffff")
         style.configure("Inactive.TButton", background="#c24a4a",
                         foreground="#ffffff")
+        style.configure("TCheckbutton", background="#1e1e1e",
+                        foreground="#d4d4d4")
+        style.map("TCheckbutton",
+                  background=[("active", "#2d2d2d")])
+        style.configure("Desc.TLabel", background="#1e1e1e",
+                        foreground="#808080", font=("Segoe UI", 8))
+        style.configure("TNotebook", background="#1e1e1e")
+        style.configure("TNotebook.Tab", background="#2d2d2d",
+                        foreground="#d4d4d4", padding=[10, 4])
+        style.map("TNotebook.Tab",
+                  background=[("selected", "#1e1e1e")],
+                  foreground=[("selected", "#569cd6")])
 
-        self._build_hotkey_frame()
-        self._build_status_frame()
-        self._build_log_frame()
+        # Use a notebook (tabs) to organize sections
+        notebook = ttk.Notebook(self._root)
+        notebook.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+
+        # --- General tab ---
+        general_frame = ttk.Frame(notebook)
+        notebook.add(general_frame, text="  General  ")
+
+        self._build_hotkey_frame(general_frame)
+        self._build_status_frame(general_frame)
+        self._build_toggles_frame(general_frame)
+
+        # --- Logs tab ---
+        logs_frame = ttk.Frame(notebook)
+        notebook.add(logs_frame, text="  Logs  ")
+
+        self._build_log_frame(logs_frame)
 
         # Set initial state appearance
         if self._active:
@@ -94,8 +120,8 @@ class SettingsUI:
     # UI Building
     # ------------------------------------------------------------------
 
-    def _build_hotkey_frame(self):
-        frame = ttk.LabelFrame(self._root, text="  Hotkey  ", padding=12)
+    def _build_hotkey_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="  Hotkey  ", padding=12)
         frame.pack(fill="x", padx=12, pady=(12, 6))
 
         row = ttk.Frame(frame)
@@ -121,8 +147,8 @@ class SettingsUI:
                                         foreground="#ce9178",
                                         font=("Segoe UI", 9, "italic"))
 
-    def _build_status_frame(self):
-        frame = ttk.LabelFrame(self._root, text="  App Control  ", padding=12)
+    def _build_status_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="  App Control  ", padding=12)
         frame.pack(fill="x", padx=12, pady=6)
 
         row = ttk.Frame(frame)
@@ -146,8 +172,8 @@ class SettingsUI:
                                         style="Active.TButton")
         self._activate_btn.pack(side="right")
 
-    def _build_log_frame(self):
-        frame = ttk.LabelFrame(self._root, text="  Live Logs  ", padding=8)
+    def _build_log_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="  Live Logs  ", padding=8)
         frame.pack(fill="both", expand=True, padx=12, pady=(6, 12))
 
         self._log_text = tk.Text(frame, bg="#1a1a1a", fg="#cccccc",
@@ -161,10 +187,123 @@ class SettingsUI:
         scrollbar.pack(side="right", fill="y")
 
         # Clear button
-        btn_row = ttk.Frame(self._root)
+        btn_row = ttk.Frame(parent)
         btn_row.pack(fill="x", padx=12, pady=(0, 8))
         ttk.Button(btn_row, text="Clear Log View",
                    command=self._clear_log).pack(side="right")
+
+    # ------------------------------------------------------------------
+    # Feature Toggles
+    # ------------------------------------------------------------------
+
+    # Each toggle: (config_key, label, description, value_type)
+    # value_type: "bool" for checkbox, or list of options for dropdown
+    _TOGGLES = [
+        ("gpu_keepalive", "GPU Keepalive",
+         "Sends a tiny pulse to the GPU every few minutes to prevent cold-start delays after idle.",
+         "bool"),
+        ("warmup_on_startup", "Warmup on Startup",
+         "Runs a quick dummy transcription at launch so the first real use is faster.",
+         "bool"),
+        ("notification_sounds", "Notification Sounds",
+         "Plays a short chime when the app is ready and after each transcription completes.",
+         "bool"),
+        ("silence_rejection", "Silence Rejection",
+         "Skips transcription if the recorded audio is silent (e.g. accidental hotkey press).",
+         "bool"),
+        ("restore_clipboard", "Restore Clipboard",
+         "Saves and restores your clipboard contents after pasting transcribed text.",
+         "bool"),
+        ("resampler", "Audio Resampler",
+         "Resampling method for microphone audio. 'soxr' is higher quality; 'linear' is the fallback.",
+         ["soxr", "linear"]),
+        ("beam_size", "Beam Size",
+         "Decoding thoroughness. Lower = faster, higher = more accurate. 1 = greedy, 3 = balanced, 5 = best.",
+         [1, 2, 3, 4, 5]),
+    ]
+
+    def _build_toggles_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="  Feature Toggles  ", padding=10)
+        frame.pack(fill="both", expand=True, padx=12, pady=(6, 12))
+
+        # Scrollable interior
+        canvas = tk.Canvas(frame, bg="#1e1e1e", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        config = self._read_config()
+        self._toggle_vars = {}
+
+        for config_key, label, desc, value_type in self._TOGGLES:
+            row = ttk.Frame(inner)
+            row.pack(fill="x", padx=4, pady=(6, 2))
+
+            current_val = config.get(config_key, None)
+
+            if value_type == "bool":
+                var = tk.BooleanVar(value=bool(current_val) if current_val is not None else True)
+                cb = ttk.Checkbutton(row, text=label, variable=var,
+                                     command=self._on_toggle_changed)
+                cb.pack(side="left", anchor="w")
+                self._toggle_vars[config_key] = var
+            elif isinstance(value_type, list):
+                ttk.Label(row, text=label + ":").pack(side="left")
+                var = tk.StringVar(value=str(current_val) if current_val is not None else str(value_type[0]))
+                combo = ttk.Combobox(row, textvariable=var,
+                                     values=[str(v) for v in value_type],
+                                     state="readonly", width=8)
+                combo.pack(side="left", padx=(8, 0))
+                combo.bind("<<ComboboxSelected>>", lambda e: self._on_toggle_changed())
+                self._toggle_vars[config_key] = var
+
+            # Description below
+            desc_label = ttk.Label(inner, text=desc, style="Desc.TLabel",
+                                   wraplength=520)
+            desc_label.pack(fill="x", padx=20, pady=(0, 4), anchor="w")
+
+        # Save indicator
+        self._toggle_save_label = ttk.Label(inner, text="",
+                                            foreground="#4ec9b0",
+                                            font=("Segoe UI", 8, "italic"))
+        self._toggle_save_label.pack(fill="x", padx=4, pady=(8, 0))
+
+    def _on_toggle_changed(self):
+        """Save all toggle values to config.json immediately."""
+        config = self._read_config()
+        for config_key, _label, _desc, value_type in self._TOGGLES:
+            var = self._toggle_vars.get(config_key)
+            if var is None:
+                continue
+            if value_type == "bool":
+                config[config_key] = var.get()
+            elif isinstance(value_type, list):
+                raw = var.get()
+                # Convert back to int if the options are ints
+                if all(isinstance(v, int) for v in value_type):
+                    try:
+                        config[config_key] = int(raw)
+                    except ValueError:
+                        config[config_key] = raw
+                else:
+                    config[config_key] = raw
+        self._write_config(config)
+        self._toggle_save_label.configure(text="Saved. Some changes take effect after restart.")
+        # Clear the message after 3 seconds
+        if self._root:
+            self._root.after(3000, lambda: self._toggle_save_label.configure(text=""))
 
     # ------------------------------------------------------------------
     # Hotkey Capture
@@ -179,6 +318,7 @@ class SettingsUI:
         self._capture_label.pack(fill="x", pady=(8, 0))
         self._change_btn.configure(state="disabled")
         self._captured_keys = set()
+        self._held_keys = set()  # track currently held keysyms
         self._root.bind("<KeyPress>", self._on_capture_key_down)
         self._root.bind("<KeyRelease>", self._on_capture_key_up)
         self._root.focus_set()
@@ -187,6 +327,7 @@ class SettingsUI:
         key = self._normalize_key(event)
         if key:
             self._captured_keys.add(key)
+            self._held_keys.add(event.keysym)
             self._capture_label.configure(
                 text="Captured: " + " + ".join(
                     k.capitalize() for k in sorted(self._captured_keys)))
@@ -194,7 +335,10 @@ class SettingsUI:
     def _on_capture_key_up(self, event):
         if not self._captured_keys:
             return
-        # Save on first key release (entire combo captured)
+        self._held_keys.discard(event.keysym)
+        # Wait until ALL keys are released before saving
+        if self._held_keys:
+            return
         self._root.unbind("<KeyPress>")
         self._root.unbind("<KeyRelease>")
         self._capture_label.pack_forget()

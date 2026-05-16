@@ -4,6 +4,7 @@ sph2txt — Microphone audio capture.
 Captures audio from the default microphone via sounddevice.
 Records at the device's native sample rate (+48 kHz typically),
 then resamples to 16 kHz mono float32 for Whisper.
+Supports high-quality soxr resampling with np.interp fallback.
 """
 
 import logging
@@ -17,16 +18,28 @@ logger = logging.getLogger(__name__)
 WHISPER_RATE = 16_000  # Whisper's required sample rate
 DTYPE = "float32"
 
+# Try to import soxr for high-quality resampling
+try:
+    import soxr as _soxr
+    _HAS_SOXR = True
+    logger.debug("soxr available — using high-quality resampling.")
+except ImportError:
+    _soxr = None
+    _HAS_SOXR = False
+
 
 class AudioRecorder:
     """Records microphone audio into an in-memory numpy buffer."""
 
-    def __init__(self):
+    def __init__(self, resampler: str = "soxr"):
         self._chunks: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
         self._recording = False
         self._device_rate: int = WHISPER_RATE
+        self._use_soxr = (resampler == "soxr" and _HAS_SOXR)
+        if resampler == "soxr" and not _HAS_SOXR:
+            logger.warning("soxr requested but not installed; falling back to linear interpolation.")
 
     @property
     def is_recording(self) -> bool:
@@ -86,13 +99,23 @@ class AudioRecorder:
             logger.warning("Audio stream status: %s", status)
         self._chunks.append(indata.copy())
 
-    @staticmethod
-    def _resample(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
-        """Resample audio using linear interpolation (no extra deps)."""
+    def _resample(self, audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
+        """Resample audio using soxr (if available) or linear interpolation."""
+        if self._use_soxr:
+            return _soxr.resample(audio, src_rate, dst_rate).astype(np.float32)
+        # Fallback: linear interpolation (introduces aliasing but works)
         ratio = dst_rate / src_rate
         n_samples = int(len(audio) * ratio)
         indices = np.arange(n_samples) / ratio
         return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+
+    @staticmethod
+    def is_silent(audio: np.ndarray, threshold: float = 0.001) -> bool:
+        """Check if audio is effectively silence (RMS below threshold)."""
+        if len(audio) == 0:
+            return True
+        rms = np.sqrt(np.mean(audio ** 2))
+        return rms < threshold
 
     @staticmethod
     def _find_input_device() -> int | None:
