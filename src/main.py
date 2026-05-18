@@ -180,6 +180,7 @@ def main():
     def _run_tray():
         try:
             tray.start()
+            logger.warning("Tray icon exited unexpectedly.")
         except Exception:
             logger.exception("Tray icon crashed")
 
@@ -198,6 +199,12 @@ def main():
     # and waits for quit signal.
     try:
         while not quit_event.is_set():
+            # Restart tray if its thread died unexpectedly
+            if not tray_thread.is_alive() and not quit_event.is_set():
+                logger.warning("Tray thread died — restarting.")
+                tray_thread = threading.Thread(target=_run_tray, daemon=True)
+                tray_thread.start()
+                time.sleep(0.5)
             # Check if settings were requested
             if tray.settings_event.wait(timeout=0.5):
                 tray.settings_event.clear()

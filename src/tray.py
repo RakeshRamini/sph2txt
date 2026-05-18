@@ -84,6 +84,7 @@ class TrayIcon:
 
     def _poll_state_queue(self, icon) -> None:
         """Drain state queue and apply updates on the tray's own thread."""
+        icon.visible = True
         try:
             while True:
                 state = self._state_queue.get_nowait()
