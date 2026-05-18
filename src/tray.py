@@ -74,6 +74,7 @@ class TrayIcon:
                 visible=lambda item: self._app_mode in ("paused", "sleeping"),
             ),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Export History...", self._on_export),
             pystray.MenuItem("Settings...", self._on_settings),
             pystray.MenuItem("Quit", self._on_quit),
         )
@@ -178,6 +179,19 @@ class TrayIcon:
             self._hotkey_listener.enabled = True
         self.set_state("idle")
         logger.info("Resumed from sleep — ready.")
+
+    def _on_export(self, icon, item):
+        """Export transcription history to CSV."""
+        threading.Thread(target=self._do_export, daemon=True).start()
+
+    def _do_export(self):
+        """Run export in background thread."""
+        try:
+            from src.export import export_csv
+            path = export_csv()
+            os.startfile(os.path.dirname(path))
+        except Exception:
+            logger.exception("Export failed")
 
     def _on_settings(self, icon, item):
         """Signal main thread to open Settings UI."""
