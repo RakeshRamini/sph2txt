@@ -86,6 +86,28 @@ class TrayIcon:
     def _poll_state_queue(self, icon) -> None:
         """Drain state queue and apply updates on the tray's own thread."""
         icon.visible = True
+        self._drain_queue()
+        # Re-schedule polling every 200ms using a single daemon timer
+        self._schedule_poll(icon)
+
+    def _schedule_poll(self, icon) -> None:
+        """Schedule the next state poll, avoiding timer accumulation."""
+        if not self._tray:
+            return
+        try:
+            t = threading.Timer(0.2, self._poll_tick, args=(icon,))
+            t.daemon = True
+            t.start()
+        except Exception:
+            logger.debug("Failed to reschedule tray poll.")
+
+    def _poll_tick(self, icon) -> None:
+        """Single poll tick: drain queue then reschedule."""
+        self._drain_queue()
+        self._schedule_poll(icon)
+
+    def _drain_queue(self) -> None:
+        """Process all pending state updates."""
         try:
             while True:
                 state = self._state_queue.get_nowait()
@@ -94,12 +116,6 @@ class TrayIcon:
             pass
         except Exception:
             logger.exception("Error processing tray state update")
-        # Re-schedule polling every 100ms
-        if self._tray:
-            try:
-                threading.Timer(0.1, self._poll_state_queue, args=(icon,)).start()
-            except Exception:
-                logger.exception("Failed to reschedule tray poll")
 
     def _apply_state(self, state: str) -> None:
         """Actually update the icon — must run on tray thread."""
@@ -116,9 +132,12 @@ class TrayIcon:
             "recording": "sph2txt — Recording...",
             "processing": "sph2txt — Processing...",
         }
-        self._tray.icon = self._icons.get(state, self._icons["idle"])
-        self._tray.title = titles.get(state, titles["idle"])
-        self._tray.update_menu()
+        try:
+            self._tray.icon = self._icons.get(state, self._icons["idle"])
+            self._tray.title = titles.get(state, titles["idle"])
+            self._tray.update_menu()
+        except Exception:
+            logger.debug("Failed to update tray state (icon may be shutting down).")
 
     @property
     def app_mode(self) -> str:

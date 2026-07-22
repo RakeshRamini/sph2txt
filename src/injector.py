@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _kb = Controller()
 _restore_timer: threading.Timer | None = None
 _restore_lock = threading.Lock()
+_inject_lock = threading.Lock()  # prevent overlapping clipboard paste operations
 
 
 def inject(text: str, config: dict) -> None:
@@ -27,7 +28,8 @@ def inject(text: str, config: dict) -> None:
 
     mode = config.get("injection_mode", "clipboard")
     if mode == "clipboard":
-        _inject_clipboard(text, config)
+        with _inject_lock:
+            _inject_clipboard(text, config)
     else:
         _inject_keystrokes(text, config)
 

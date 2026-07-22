@@ -55,14 +55,19 @@ class AudioRecorder:
             # Use the device's native sample rate to avoid PortAudio errors
             dev_info = sd.query_devices(device)
             self._device_rate = int(dev_info["default_samplerate"])
-            self._stream = sd.InputStream(
+            stream = sd.InputStream(
                 device=device,
                 samplerate=self._device_rate,
                 channels=1,
                 dtype=DTYPE,
                 callback=self._audio_callback,
             )
-            self._stream.start()
+            try:
+                stream.start()
+            except Exception:
+                stream.close()
+                raise
+            self._stream = stream
             self._recording = True
             logger.info("Recording started (device=%s, rate=%d Hz).",
                         dev_info["name"], self._device_rate)
@@ -72,13 +77,16 @@ class AudioRecorder:
         with self._lock:
             if not self._recording:
                 return np.array([], dtype=np.float32)
-            self._stream.stop()
-            self._stream.close()
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                logger.warning("Error closing audio stream.", exc_info=True)
             self._stream = None
             self._recording = False
 
         if not self._chunks:
-            logger.warning("No audio captured.")
+            logger.warning("No audio chunks captured (stream may have failed to deliver data).")
             return np.array([], dtype=np.float32)
 
         audio = np.concatenate(self._chunks, axis=0).flatten()

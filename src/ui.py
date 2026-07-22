@@ -428,8 +428,11 @@ class SettingsUI:
     # ------------------------------------------------------------------
 
     def _read_config(self):
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {}
 
     def _write_config(self, config):
         with open(_CONFIG_PATH, "w", encoding="utf-8") as f:

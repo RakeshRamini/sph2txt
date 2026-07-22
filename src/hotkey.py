@@ -165,8 +165,15 @@ class HotkeyListener:
 
     def _fire_press(self):
         logger.debug("Hotkey pressed → recording start")
-        threading.Thread(target=self._on_press, daemon=True).start()
+        threading.Thread(target=self._safe_call, args=(self._on_press, "on_press"), daemon=True).start()
 
     def _fire_release(self):
         logger.debug("Hotkey released → recording stop")
-        threading.Thread(target=self._on_release, daemon=True).start()
+        threading.Thread(target=self._safe_call, args=(self._on_release, "on_release"), daemon=True).start()
+
+    def _safe_call(self, func, name):
+        """Call a callback with exception logging to prevent silent thread death."""
+        try:
+            func()
+        except Exception:
+            logger.exception("Unhandled exception in hotkey callback '%s'", name)

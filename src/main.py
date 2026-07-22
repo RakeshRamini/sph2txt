@@ -131,17 +131,36 @@ def main():
     silence_rejection = config.get("silence_rejection", True)
     silence_threshold = config.get("silence_threshold", 0.001)
 
+    # Log unhandled exceptions in daemon threads instead of silently dropping them
+    _orig_excepthook = threading.excepthook
+    def _thread_excepthook(args):
+        if args.exc_type is SystemExit:
+            return
+        logger.error("Unhandled exception in thread %s", args.thread,
+                     exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        _orig_excepthook(args)
+    threading.excepthook = _thread_excepthook
+
     # --- Pipeline callbacks ---
     def on_hotkey_press():
         if tray.app_mode != "active":
             return
         tray.set_state("recording")
-        recorder.start()
+        try:
+            recorder.start()
+        except Exception:
+            logger.exception("Failed to start audio recording")
+            tray.set_state("idle")
 
     def on_hotkey_release():
         if tray.app_mode != "active":
             return
-        audio = recorder.stop()
+        try:
+            audio = recorder.stop()
+        except Exception:
+            logger.exception("Failed to stop audio recording")
+            tray.set_state("idle")
+            return
         if len(audio) == 0:
             logger.warning("No audio captured, skipping.")
             tray.set_state("idle")
